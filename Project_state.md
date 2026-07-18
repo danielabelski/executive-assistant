@@ -25,10 +25,10 @@ user-chosen providers and permission levels set during an onboarding wizard.
       validation contracts, deterministic fallbacks; live-verified on Jetson
       (qwen2.5:3b, 3.8s warm; hallucination regression test added)
 - [x] 136 tests, all green; live smoke: local-ics + tasks + NWS weather
-- [x] v0.1.0 pushed to github.com/drwjkirkpatrick-web/executive-assistant
+- [x] v0.1.0 + v0.2.0 pushed to github.com/drwjkirkpatrick-web/executive-assistant
 
 ### In Progress
-- [ ] v0.2.0 commit (local-only LLM mode)
+- [ ] —
 
 ### Not Started
 - [ ] Google OAuth flow (needs Walker's browser, ~10 min)
@@ -62,6 +62,9 @@ user-chosen providers and permission levels set during an onboarding wizard.
 
 ## 7. Recent Session Log
 - 2026-07-18: v0.1.0 — full provider layer + phrasebank + composer; 121 tests green.
+- 2026-07-18: v0.2.0 — llm.local_only Ollama mode: policy-enforcing thinker,
+  answer-validation contracts, deterministic fallbacks; live-verified on Jetson
+  (qwen2.5:3b, 3.8s warm, hallucination regression caught + fixed); 136 tests.
 - 2026-07-18: Project kicked off; scope + permission-chooser requirement set.
 
 ## 8. References
