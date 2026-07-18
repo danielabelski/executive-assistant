@@ -1,0 +1,87 @@
+# ============================================================================
+# Executive Assistant — example configuration (schema v2: PROVIDERS)
+# ----------------------------------------------------------------------------
+# Copy to config/config.yaml and edit, OR just run the chooser wizard:
+#
+#     python -m executive_assistant onboard
+#
+# config.yaml is gitignored on purpose. Passwords go in config/secrets.yaml
+# (also gitignored, chmod 600) — never in this file.
+# ============================================================================
+
+version: 2
+
+user:
+  name: "Walker"
+  timezone: "America/Los_Angeles"      # IANA name
+
+# --- EMAIL ---------------------------------------------------------------------
+# provider: none | gmail | imap
+#   gmail — Google OAuth (run `python -m executive_assistant auth` once)
+#   imap  — any IMAP+SMTP account (Fastmail, Outlook, ProtonMail Bridge…)
+email:
+  provider: "gmail"
+  # THE permission policy — picked by the USER during onboarding:
+  #   draft_only        — read + create drafts; never sends
+  #   approve_send      — draft, then ask in chat before EVERY send
+  #   auto_send_routine — routine_senders auto; everyone else asks
+  permission: "draft_only"
+  important_senders: []                # flagged ⭐ in briefings
+  routine_senders: []                  # only used in auto_send_routine mode
+  # imap:                              # required when provider: imap
+  #   host: "imap.fastmail.com"
+  #   port: 993
+  #   smtp_host: "smtp.fastmail.com"
+  #   smtp_port: 465
+  #   username: "you@fastmail.com"
+  #   drafts_folder: "Drafts"
+  #   # password → secrets.yaml key: email_imap_password
+
+# --- CALENDAR --------------------------------------------------------------------
+# provider: none | google | caldav | local_ics
+calendar:
+  provider: "google"
+  # caldav:                            # required when provider: caldav
+  #   url: "https://HOST/remote.php/dav/calendars/USER/personal/"
+  #   username: "you"
+  #   # password → secrets.yaml key: calendar_caldav_password
+  # local_ics:                         # used when provider: local_ics
+  #   path: "calendar.ics"
+
+# --- Other integrations -------------------------------------------------------------
+integrations:
+  tasks: true                          # local tasks.md file
+  weather: true                        # US National Weather Service (free, no key)
+  github: false                        # stub — interface ready, off by default
+
+tasks:
+  path: "tasks.md"
+
+weather:
+  zip_code: "97201"                    # onboarding resolves this automatically
+  latitude: 45.5078
+  longitude: -122.6897
+  label: "Portland, OR"
+
+github:
+  username: ""
+  repos: []
+
+# --- Briefings ----------------------------------------------------------------------
+briefing:
+  morning_time: "07:00"                # informational; real schedule = Hermes cron
+  evening_time: "18:00"
+  max_emails: 5
+  max_tasks: 10
+
+# --- LLM routing -----------------------------------------------------------------------
+# Routine language comes from the local phrasebank (data/phrasebank.db, ~1,050
+# phrases) at ZERO token cost. Only genuine judgment calls — ranking
+# priorities, triaging email, drafting replies — go to a model. Use a good one.
+llm:
+  thinking_model: "kimi-k3"            # any Hermes/OpenRouter model id
+
+# --- Google OAuth files ------------------------------------------------------------------
+google:
+  client_secret_file: "credentials/google_client_secret.json"
+  token_file: "credentials/google_token.json"

@@ -1,0 +1,12 @@
+# Core dependencies — all pure Python, ARM64/Jetson friendly
+requests>=2.31
+PyYAML>=6.0
+defusedxml>=0.7   # safe XML parsing for CalDAV server responses
+
+# Google Workspace (Gmail + Calendar)
+google-api-python-client>=2.100
+google-auth-httplib2>=0.2
+google-auth-oauthlib>=1.2
+
+# Tests
+pytest>=8.0

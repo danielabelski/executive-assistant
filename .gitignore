@@ -1,0 +1,29 @@
+# Local configuration (contains your choices + paths) — never commit
+config/config.yaml
+config/secrets.yaml
+
+# Google OAuth credentials — never commit
+credentials/
+*.token
+token.json
+
+# Generated phrasebank DB (rebuilds automatically from phrasebank_data.py)
+data/
+
+# Personal data files created by onboarding
+tasks.md
+*.ics
+my.ics
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
