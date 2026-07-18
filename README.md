@@ -88,10 +88,35 @@ vocabulary sets. Rendered with slots, seeded by date so the assistant's
 voice is consistent within a day and varies day to day.
 
 **The LLM is reserved for genuine judgment.** `composer.py` builds compact
-"thinking jobs" — e.g. *"Pick the 3 most urgent tasks. Reply with ONLY the
-numbers."* — that stay under a ~600-character budget (a full briefing
-context runs 2,000+). Those go to the configured strong model
-(`llm.thinking_model`, default `kimi-k3`). Templates cover the rest.
+"thinking jobs" — e.g. *"Order these tasks by urgency… Reply with ONLY the
+task numbers."* — that stay under a ~600-character budget (a full briefing
+context runs 2,000+).
+
+## 🏠 Local-only mode — zero token fees, forever
+
+Set `llm.local_only: true` (or pick **"Local Ollama ONLY"** in onboarding)
+and the assistant *structurally cannot* spend a token:
+
+- Thinking jobs execute on your **local Ollama** (default `qwen2.5:3b` —
+  a good Jetson-class thinker) via plain HTTP. No cloud endpoint exists in
+  this code path.
+- Every model answer passes a **validation contract** (`thinker.py`): a
+  ranking must contain real task numbers, a triage must name a listed
+  email. Small models sometimes hallucinate — we watched a 3B answer
+  `4,5,6` for a five-task list — and garbage never reaches you.
+- If Ollama is down, or the answer fails validation, **deterministic
+  fallbacks** (due-date/priority sort, important-sender match) produce a
+  dependable answer instead. The engine that produced each outcome is
+  always labeled (`ollama:qwen2.5:3b`, `fallback(ollama-down)`,
+  `fallback(ollama-invalid)`), so behavior is auditable.
+
+Verified live on a Jetson: 3.8s warm latency for a priority-ranking job,
+zero bytes leaving the machine. `doctor` checks Ollama reachability and
+whether the model is pulled.
+
+When `local_only` is false, jobs return to Hermes / your configured strong
+model (`llm.thinking_model`, default `kimi-k3`) — use a good one; it's the
+only model you pay for.
 
 ## 🚀 Quick start
 
@@ -136,6 +161,7 @@ executive_assistant/
 ├── approval.py          # the gate every sensitive action must pass
 ├── briefing.py          # morning briefing + evening wrap-up (resilient by design)
 ├── composer.py          # template assembly + compact "thinking jobs" for the LLM
+├── thinker.py           # policy-enforcing job executor: local Ollama + validation + fallbacks
 ├── phrasebank.py        # SQLite phrase store (~1,056 phrases, slot rendering)
 ├── phrasebank_data.py   # the curated phrase data (66 categories, 4 registers)
 ├── types.py             # Event / EmailSummary — the providers' common language
@@ -165,7 +191,7 @@ executive_assistant/
 
 ```bash
 python -m pytest tests/ -q
-# 121 passed
+# 136 passed
 ```
 
 ## 🛣 Roadmap

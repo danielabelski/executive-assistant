@@ -119,9 +119,12 @@ class AssistantConfig:
     max_emails: int = 5
     max_tasks: int = 10
 
-    # LLM routing — templates (phrasebank) cover routine language; this model
-    # is reserved for the few genuine judgment calls (see composer.py)
+    # LLM routing — templates (phrasebank) cover routine language; thinking
+    # jobs go either to a strong cloud model or to LOCAL OLLAMA ONLY
     thinking_model: str = "kimi-k3"
+    llm_local_only: bool = False        # true = never call a paid/cloud API
+    ollama_model: str = "qwen2.5:3b"    # used when llm_local_only is true
+    ollama_host: str = "http://localhost:11434"
 
     # google oauth file locations (relative to project root)
     google_client_secret_file: str = "credentials/google_client_secret.json"
@@ -232,6 +235,9 @@ def load_config(path: Path | None = None) -> AssistantConfig:
         max_emails=int(raw.get("briefing", {}).get("max_emails", 5)),
         max_tasks=int(raw.get("briefing", {}).get("max_tasks", 10)),
         thinking_model=raw.get("llm", {}).get("thinking_model", "kimi-k3"),
+        llm_local_only=bool(raw.get("llm", {}).get("local_only", False)),
+        ollama_model=raw.get("llm", {}).get("ollama_model", "qwen2.5:3b"),
+        ollama_host=raw.get("llm", {}).get("ollama_host", "http://localhost:11434"),
         google_client_secret_file=raw.get("google", {}).get(
             "client_secret_file", "credentials/google_client_secret.json"
         ),
@@ -300,7 +306,12 @@ def save_config(cfg: AssistantConfig, path: Path | None = None) -> Path:
             "max_emails": cfg.max_emails,
             "max_tasks": cfg.max_tasks,
         },
-        "llm": {"thinking_model": cfg.thinking_model},
+        "llm": {
+            "thinking_model": cfg.thinking_model,
+            "local_only": cfg.llm_local_only,
+            "ollama_model": cfg.ollama_model,
+            "ollama_host": cfg.ollama_host,
+        },
         "google": {
             "client_secret_file": cfg.google_client_secret_file,
             "token_file": cfg.google_token_file,

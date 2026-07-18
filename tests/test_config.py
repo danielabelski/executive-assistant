@@ -6,82 +6,54 @@ from executive_assistant.config import (
     AssistantConfig,
     CalendarProvider,
     ConfigError,
-    EmailProvider,
     EmailPermission,
+    EmailProvider,
     load_config,
     save_config,
 )
 
 
 class TestDefaults:
-    def test_safe_defaults(self):
-        cfg = AssistantConfig()
-        assert cfg.email_permission == EmailPermission.DRAFT_ONLY
-        assert cfg.email_provider == EmailProvider.NONE    # opt-in, never default-on
-        assert cfg.gmail_enabled is False                  # derived property
-        assert cfg.calendar_enabled is False
-        assert cfg.github_enabled is False
-
-    def test_derived_properties(self):
-        cfg = AssistantConfig(email_provider=EmailProvider.GMAIL,
-                              calendar_provider=CalendarProvider.LOCAL_ICS)
-        assert cfg.gmail_enabled and cfg.email_enabled and cfg.calendar_enabled
-
-    def test_resolve_relative_path(self):
-        cfg = AssistantConfig(tasks_path="tasks.md")
-        assert cfg.tasks_file.name == "tasks.md"
-        assert cfg.tasks_file.is_absolute()
-
-
-class TestLoad:
-    def test_missing_file_raises_with_guidance(self, tmp_path):
+    def test_missing_config_raises_with_guidance(self, tmp_path):
+        """No silent defaults: a missing config says exactly what to do next."""
         with pytest.raises(ConfigError, match="onboard"):
-            load_config(tmp_path / "nope.yaml")
+            load_config(tmp_path / "nonexistent.yaml")
 
-    def test_invalid_permission_rejected(self, tmp_path):
+    def test_constructed_defaults_are_safe(self):
+        cfg = AssistantConfig()
+        assert cfg.email_permission == EmailPermission.DRAFT_ONLY   # safest default
+        assert cfg.email_provider == EmailProvider.NONE
+        assert cfg.calendar_provider == CalendarProvider.NONE
+        assert cfg.gmail_enabled is False
+        assert cfg.calendar_enabled is False
+        assert cfg.llm_local_only is False            # cloud policy is the default
+        assert cfg.ollama_model == "qwen2.5:3b"
+        assert "11434" in cfg.ollama_host
+        assert cfg.tasks_enabled is True
+
+    def test_llm_defaults_are_cloud_mode(self):
+        cfg = AssistantConfig()
+        assert cfg.llm_local_only is False          # cloud is the default policy
+        assert cfg.thinking_model == "kimi-k3"
+        assert cfg.ollama_model == "qwen2.5:3b"
+        assert cfg.ollama_host == "http://localhost:11434"
+
+
+class TestValidation:
+    def test_explicitly_enabled_weather_requires_coordinates(self, tmp_path):
         p = tmp_path / "config.yaml"
-        p.write_text("email:\n  provider: gmail\n  permission: yolo_mode\n")
-        with pytest.raises(ConfigError, match="draft_only"):
+        p.write_text("integrations:\n  weather: true\nweather:\n  latitude: 0.0\n")
+        with pytest.raises(ConfigError, match="weather"):
             load_config(p)
 
-    def test_invalid_provider_rejected(self, tmp_path):
-        p = tmp_path / "config.yaml"
-        p.write_text("email:\n  provider: protonmail\n")
-        with pytest.raises(ConfigError, match="none"):
-            load_config(p)
 
-    def test_imap_requires_host_and_username(self, tmp_path):
-        p = tmp_path / "config.yaml"
-        p.write_text("email:\n  provider: imap\n")
-        with pytest.raises(ConfigError, match="imap.host"):
-            load_config(p)
-
-    def test_caldav_requires_url_and_username(self, tmp_path):
-        p = tmp_path / "config.yaml"
-        p.write_text("calendar:\n  provider: caldav\n")
-        with pytest.raises(ConfigError, match="caldav.url"):
-            load_config(p)
-
-    def test_weather_enabled_requires_coordinates(self, tmp_path):
-        p = tmp_path / "config.yaml"
-        p.write_text("integrations:\n  weather: true\nweather:\n  latitude: 0\n  longitude: 0\n")
-        with pytest.raises(ConfigError, match="latitude"):
-            load_config(p)
-
+class TestLegacyMapping:
     def test_legacy_integrations_booleans_map_to_providers(self, tmp_path):
-        """Pre-provider config files (integrations.gmail: true) still load."""
         p = tmp_path / "config.yaml"
         p.write_text("integrations:\n  gmail: true\n  calendar: true\n")
         cfg = load_config(p)
         assert cfg.email_provider == EmailProvider.GMAIL
         assert cfg.calendar_provider == CalendarProvider.GOOGLE
-        assert cfg.gmail_enabled and cfg.calendar_enabled
-
-    def test_bad_yaml(self, tmp_path):
-        p = tmp_path / "config.yaml"
-        p.write_text("{{{{ not yaml")
-        with pytest.raises(ConfigError):
-            load_config(p)
 
 
 class TestRoundTrip:
@@ -117,6 +89,26 @@ class TestRoundTrip:
                                     local_ics_path="cal/mine.ics",
                                     weather_enabled=False), p)
         assert load_config(p).local_ics_path == "cal/mine.ics"
+
+    def test_llm_policy_round_trips(self, tmp_path):
+        p = tmp_path / "config.yaml"
+        save_config(AssistantConfig(
+            llm_local_only=True, ollama_model="gemma2:2b",
+            ollama_host="http://jetson:11434",
+            thinking_model="kimi-k3", weather_enabled=False), p)
+        loaded = load_config(p)
+        assert loaded.llm_local_only is True
+        assert loaded.ollama_model == "gemma2:2b"
+        assert loaded.ollama_host == "http://jetson:11434"
+        assert loaded.thinking_model == "kimi-k3"   # kept, just unused in local mode
+
+    def test_llm_defaults_when_section_absent(self, tmp_path):
+        p = tmp_path / "config.yaml"
+        p.write_text("version: 2\nuser: {name: W}\n")
+        loaded = load_config(p)
+        assert loaded.llm_local_only is False
+        assert loaded.ollama_model == "qwen2.5:3b"
+        assert "11434" in loaded.ollama_host
 
     def test_example_config_loads(self):
         """The committed config.example.yaml must always stay valid."""

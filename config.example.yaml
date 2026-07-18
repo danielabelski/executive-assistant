@@ -77,8 +77,15 @@ briefing:
 # --- LLM routing -----------------------------------------------------------------------
 # Routine language comes from the local phrasebank (data/phrasebank.db, ~1,050
 # phrases) at ZERO token cost. Only genuine judgment calls — ranking
-# priorities, triaging email, drafting replies — go to a model. Use a good one.
+# priorities, triaging email, drafting replies — go to a model.
 llm:
+  # local_only: true = NEVER call a paid/cloud API. Thinking jobs run on your
+  # local Ollama; if Ollama is down or the model answers nonsense, validated
+  # deterministic fallbacks keep everything working at zero cost.
+  local_only: false
+  ollama_model: "qwen2.5:3b"           # good Jetson-class thinker
+  ollama_host: "http://localhost:11434"
+  # used only when local_only is false — pick a strong model:
   thinking_model: "kimi-k3"            # any Hermes/OpenRouter model id
 
 # --- Google OAuth files ------------------------------------------------------------------

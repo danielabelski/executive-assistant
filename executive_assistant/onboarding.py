@@ -167,8 +167,13 @@ def _collect_permission(cfg: AssistantConfig, input_func: InputFunc, out: Output
 
 def run_onboarding(input_func: InputFunc = input,
                    out: OutputFunc = print,
-                   save: bool = True) -> AssistantConfig:
-    """Walk the user through every choice; return (and save) the config."""
+                   save: bool = True,
+                   probe_services: bool = True) -> AssistantConfig:
+    """Walk the user through every choice; return (and save) the config.
+
+    probe_services controls the optional live Ollama check on the local-LLM
+    path (tests disable it to stay offline).
+    """
     out("=" * 68)
     out("  Executive Assistant — setup")
     out("  Every choice is yours, and every choice can be changed later by")
@@ -261,9 +266,21 @@ def run_onboarding(input_func: InputFunc = input,
     out("")
     out("THINKING MODEL — routine language comes from the local phrasebank")
     out("(zero tokens). A few jobs need real judgment: ranking priorities,")
-    out("triaging email, drafting replies. Those go to a strong model.")
-    cfg.thinking_model = _ask("Model for the thinking parts (Hermes/OpenRouter id)",
-                              cfg.thinking_model, input_func, out)
+    out("triaging email, drafting replies.")
+    out("  1) Cloud model — best quality, per-token fees (Hermes/OpenRouter)")
+    out("  2) Local Ollama ONLY — free, offline, private (runs on this machine)")
+    llm_choice = _ask("Choose 1 or 2", "1", input_func, out).strip()
+    if llm_choice == "2":
+        cfg.llm_local_only = True
+        cfg.ollama_model = _ask("Ollama model for thinking", cfg.ollama_model,
+                                input_func, out)
+        cfg.ollama_host = _ask("Ollama host", cfg.ollama_host, input_func, out)
+        if probe_services:
+            _probe_ollama(cfg, out)
+    else:
+        cfg.llm_local_only = False
+        cfg.thinking_model = _ask("Model for the thinking parts (Hermes/OpenRouter id)",
+                                  cfg.thinking_model, input_func, out)
 
     # 8) Briefing preferences -----------------------------------------------------------------
     out("")
@@ -282,6 +299,25 @@ def run_onboarding(input_func: InputFunc = input,
             _ensure_ics_file(cfg, out)
         _print_next_steps(cfg, out)
     return cfg
+
+
+def _probe_ollama(cfg: AssistantConfig, out: OutputFunc) -> None:
+    """Live check after choosing local-only LLM: is Ollama up + model pulled?
+    Purely informational — setup succeeds either way (fallbacks cover gaps)."""
+    from executive_assistant.thinker import ollama_model_pulled, OllamaError
+
+    try:
+        if ollama_model_pulled(cfg.ollama_model, cfg.ollama_host):
+            out(f"  ✓ Ollama reachable and '{cfg.ollama_model}' is pulled — "
+                "fully local operation confirmed.")
+        else:
+            out(f"  ⚠ Ollama is running but '{cfg.ollama_model}' is not pulled.")
+            out(f"    Run: ollama pull {cfg.ollama_model}")
+            out("    (Deterministic fallbacks cover thinking jobs until then.)")
+    except OllamaError:
+        out(f"  ⚠ Ollama not reachable at {cfg.ollama_host}.")
+        out("    Start it with `ollama serve`, or install from https://ollama.com")
+        out("    (Deterministic fallbacks cover thinking jobs until then.)")
 
 
 def _ensure_tasks_file(cfg: AssistantConfig, out: OutputFunc) -> None:

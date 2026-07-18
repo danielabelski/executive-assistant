@@ -60,7 +60,7 @@ class TestThinkingJobs:
         job = composer(pb).job_prioritize_tasks(tasks)
         assert job.kind == "prioritize_tasks"
         assert job.within_budget, f"{len(job.prompt)} chars exceeds {THINKING_PROMPT_BUDGET}"
-        assert "ONLY the numbers" in job.prompt          # forces terse model output
+        assert "ONLY the task numbers" in job.prompt     # forces terse model output
         assert "10." in job.prompt and "11." not in job.prompt  # hard cap applied
 
     def test_triage_prompt_is_compact(self, pb):

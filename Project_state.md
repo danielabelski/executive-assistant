@@ -16,22 +16,25 @@ user-chosen providers and permission levels set during an onboarding wizard.
 - [x] Provider architecture: Gmail · IMAP+SMTP · Google Calendar · CalDAV ·
       local .ics · none — chosen per-user during onboarding
 - [x] Onboarding chooser: provider menus, 3 email permission levels,
-      thinking-model selection; passwords → gitignored secrets.yaml (600)
+      thinking-model selection (cloud vs local-only); passwords → secrets.yaml
 - [x] approval.py policy gate (draft_only / approve_send / auto_send_routine)
 - [x] Phrasebank: 1,056 curated phrases, 66 categories, SQLite store,
       day-seeded rendering — routine language costs ~0 tokens
-- [x] composer.py: compact "thinking jobs" (≤600 chars) routed to a strong
-      model (llm.thinking_model, default kimi-k3)
-- [x] 121 tests, all green; live smoke test: local-ics + tasks + NWS weather
-- [x] README (Phosphorus voice), config.example.yaml v2, .gitignore
+- [x] composer.py: compact "thinking jobs" (≤600 chars) per job
+- [x] thinker.py: llm.local_only mode — local Ollama execution, answer
+      validation contracts, deterministic fallbacks; live-verified on Jetson
+      (qwen2.5:3b, 3.8s warm; hallucination regression test added)
+- [x] 136 tests, all green; live smoke: local-ics + tasks + NWS weather
+- [x] v0.1.0 pushed to github.com/drwjkirkpatrick-web/executive-assistant
 
 ### In Progress
-- [ ] First push to GitHub (repo created: drwjkirkpatrick-web/executive-assistant)
+- [ ] v0.2.0 commit (local-only LLM mode)
 
 ### Not Started
 - [ ] Google OAuth flow (needs Walker's browser, ~10 min)
 - [ ] Walker runs `python -m executive_assistant onboard` for real
 - [ ] Cron jobs: 7 AM briefing + 6 PM wrap-up to Telegram
+- [ ] Optional: systemd --user unit for ollama serve (no sudo needed)
 
 ## 3. Architecture & Key Decisions
 | Decision | Rationale | Date |

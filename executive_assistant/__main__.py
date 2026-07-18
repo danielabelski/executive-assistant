@@ -149,6 +149,23 @@ def _cmd_doctor(_args) -> int:
 
     print(f"  {'✓' if not cfg.github_enabled else '◌'} github "
           f"({'disabled' if not cfg.github_enabled else 'enabled (stub)'})")
+
+    # LLM policy — local_only mode promises ZERO paid API calls; verify the
+    # local path is actually healthy (Ollama up + model pulled).
+    if cfg.llm_local_only:
+        from executive_assistant.thinker import Thinker
+
+        status = Thinker(cfg).status()
+        if status["reachable"] and status["model_pulled"]:
+            print(f"  ✓ local-only LLM — ollama:{status['model']} ready (zero token fees)")
+        else:
+            why = "Ollama unreachable" if not status["reachable"] else \
+                  f"model not pulled — run: ollama pull {status['model']}"
+            print(f"  ⚠ local-only LLM — {why}")
+            print("    (deterministic fallbacks will cover thinking jobs; no fees either way)")
+    else:
+        print(f"  ◌ thinking model: {cfg.thinking_model} (cloud — per-token fees apply)")
+
     print("\nOverall:", "✓ ready" if ok else "✗ fix the ✗ items above")
     return 0 if ok else 1
 

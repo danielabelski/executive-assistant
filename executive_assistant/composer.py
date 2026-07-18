@@ -87,11 +87,15 @@ class BriefingComposer:
             due = f", due {t.due}" if t.due else ""
             lines.append(f"{i}. {t.title} ({t.priority}{due})")
         prompt = (
-            f"Pick the {top_n} most urgent tasks for a busy physician. "
-            "Reply with ONLY the numbers, comma-separated.\n" + "\n".join(lines)
+            "Order these tasks by urgency: overdue first, then due date, "
+            "then high priority. Reply with ONLY the task numbers in order, "
+            "comma-separated.\n" + "\n".join(lines)
         )
+        # structured context powers the deterministic fallback (see thinker.py)
         return ThinkingJob(kind="prioritize_tasks", prompt=prompt,
-                           context={"top_n": top_n, "count": len(tasks)})
+                           context={"top_n": top_n, "count": len(tasks),
+                                    "tasks": [(t.title, t.due, t.priority)
+                                              for t in tasks[:10]]})
 
     def job_triage_email(self, summaries: list) -> ThinkingJob:
         """Which unread email most deserves a reply? Sender+subject only."""
@@ -101,7 +105,8 @@ class BriefingComposer:
             "Reply with ONLY the number, or 0 for none.\n" + "\n".join(lines)
         )
         return ThinkingJob(kind="triage_email", prompt=prompt,
-                           context={"count": len(summaries)})
+                           context={"count": len(summaries),
+                                    "senders": [s.sender for s in summaries[:8]]})
 
     def job_draft_reply(self, sender: str, subject: str, body_excerpt: str,
                         tone: str = "neutral") -> ThinkingJob:
