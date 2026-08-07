@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from googleapiclient.discovery import build
 
 from executive_assistant.google_auth import CALENDAR_SCOPES, load_credentials
-from executive_assistant.types import Event
+from executive_assistant.types import Event, next_up
 
 
 class CalendarClient:
@@ -33,6 +33,10 @@ class CalendarClient:
         start = datetime.combine(now.date(), time.min, tzinfo=self.tz)
         end = start + timedelta(days=1)
         return self.events_between(start, end)
+
+    def next_event(self, now: datetime | None = None) -> tuple[Event, int] | None:
+        """Next timed event today → (event, minutes_until); None if none left."""
+        return next_up(self.events_today(), now or datetime.now(self.tz))
 
     def events_between(self, start: datetime, end: datetime) -> list[Event]:
         resp = (

@@ -79,3 +79,44 @@ class TestRendering:
         a = pb.phrase("greeting_morning", rng=random.Random(42), name="")
         b = pb.phrase("greeting_morning", rng=random.Random(42), name="")
         assert a == b
+
+
+class TestUsageStats:
+    """Every render leaves a crumb — hot phrases earn variants, cold ones
+    get pruned. Stats are best-effort: a broken stats path must never
+    break a briefing."""
+
+    def test_render_records_usage(self, pb):
+        before = sum(n for _, _, n in pb.stats(limit=1000))
+        pb.phrase("greeting_morning", rng=random.Random(7), name=", W")
+        after = sum(n for _, _, n in pb.stats(limit=1000))
+        assert after == before + 1
+
+    def test_stats_shape(self, pb):
+        pb.phrase("greeting_evening", rng=random.Random(1), name="")
+        rows = pb.stats(limit=5)
+        assert rows, "expected at least one usage row after a render"
+        category, text, n = rows[0]
+        assert isinstance(category, str) and isinstance(text, str)
+        assert n >= 1
+
+    def test_stats_survive_reopen(self, pb):
+        pb.phrase("greeting_morning", rng=random.Random(3), name="")
+        reopened = PhraseBank(pb.db_path)
+        assert sum(n for _, _, n in reopened.stats(limit=1000)) >= 1
+
+
+class TestCategoryCounts:
+    def test_counts_cover_all_categories(self, pb):
+        counts = dict(pb.category_counts())
+        assert set(counts) == set(pb.categories())
+        assert all(n > 0 for n in counts.values())
+
+    def test_total_matches_count(self, pb):
+        assert sum(n for _, n in pb.category_counts()) == pb.count()
+
+
+class TestSlotValidation:
+    def test_shipped_data_has_no_unknown_slots(self, pb):
+        # Doctor runs this; a typo'd {slot} would render '' silently forever.
+        assert pb.validate_slots() == []

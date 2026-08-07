@@ -17,12 +17,28 @@ LEGACY COMPAT: config files written before providers existed (with
 integrations.gmail / integrations.calendar booleans) still load — the
 booleans are mapped onto the provider model at read time.
 
+SCHEMA VERSIONING
+-----------------
+SCHEMA_VERSION is the current config-file schema. load() stamps the
+resulting AssistantConfig with it; if the on-disk file declares an older
+version (or none), the ORIGINAL file is copied to <file>.bak before any
+later rewrite can touch it, so a schema upgrade is never destructive.
+
+ENVIRONMENT OVERRIDES (applied at load, win over the YAML file)
+---------------------------------------------------------------
+    EXEC_ASSISTANT_TZ                 → user.timezone
+    EXEC_ASSISTANT_THINKING_MODEL     → llm.thinking_model
+    EXEC_ASSISTANT_EMAIL_PROVIDER     → email.provider (none|gmail|imap)
+    EXEC_ASSISTANT_CALENDAR_PROVIDER  → calendar.provider (none|google|caldav|local_ics)
+    EXEC_ASSISTANT_QUIET_HOURS        → briefing.quiet_hours (e.g. "22:00-07:00")
+
 Search order:  1. $EXEC_ASSISTANT_CONFIG   2. <project>/config/config.yaml
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -32,6 +48,10 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "config.yaml"
 ENV_VAR = "EXEC_ASSISTANT_CONFIG"
+
+#: Current config-file schema version. Bump when the YAML layout changes in a
+#: way load() must migrate; old files are backed up to <file>.bak on load.
+SCHEMA_VERSION = 3
 
 
 class ConfigError(Exception):
@@ -68,6 +88,8 @@ class CalendarProvider:
 @dataclass
 class AssistantConfig:
     """Typed, validated view of config.yaml."""
+
+    schema_version: int = SCHEMA_VERSION
 
     # user
     user_name: str = "there"
@@ -118,6 +140,14 @@ class AssistantConfig:
     evening_time: str = "18:00"
     max_emails: int = 5
     max_tasks: int = 10
+    quiet_hours: str | None = None                    # e.g. "22:00-07:00"
+    briefing_section_order: list[str] = field(default_factory=list)
+    briefing_weekend_sections: list[str] = field(default_factory=list)
+    briefing_max_lines: int = 10
+    daily_auto_send_limit: int = 20                   # auto-send rate cap / day
+    vip_senders: list[str] = field(default_factory=list)
+    email_unread_only: bool = False
+    thinker_timeout_s: int = 90                       # LLM thinking-job timeout
 
     # LLM routing — templates (phrasebank) cover routine language; thinking
     # jobs go either to a strong cloud model or to LOCAL OLLAMA ONLY
@@ -186,6 +216,15 @@ def load_config(path: Path | None = None) -> AssistantConfig:
     if not isinstance(raw, dict):
         raise ConfigError(f"Config file {path} must contain a YAML mapping.")
 
+    # Schema upgrade guard: an old file is preserved verbatim before any
+    # later save() can rewrite it in the new layout.
+    try:
+        file_version = int(raw.get("version", 1) or 1)
+    except (TypeError, ValueError):
+        file_version = 1
+    if file_version < SCHEMA_VERSION:
+        shutil.copy2(path, path.with_name(path.name + ".bak"))
+
     email_raw = raw.get("email", {})
     calendar_raw = raw.get("calendar", {})
     integrations = raw.get("integrations", {})
@@ -234,6 +273,16 @@ def load_config(path: Path | None = None) -> AssistantConfig:
         evening_time=raw.get("briefing", {}).get("evening_time", "18:00"),
         max_emails=int(raw.get("briefing", {}).get("max_emails", 5)),
         max_tasks=int(raw.get("briefing", {}).get("max_tasks", 10)),
+        quiet_hours=raw.get("briefing", {}).get("quiet_hours"),
+        briefing_section_order=list(
+            raw.get("briefing", {}).get("section_order", []) or []),
+        briefing_weekend_sections=list(
+            raw.get("briefing", {}).get("weekend_sections", []) or []),
+        briefing_max_lines=int(raw.get("briefing", {}).get("max_lines", 10)),
+        daily_auto_send_limit=int(email_raw.get("daily_auto_send_limit", 20)),
+        vip_senders=list(email_raw.get("vip_senders", []) or []),
+        email_unread_only=bool(email_raw.get("unread_only", False)),
+        thinker_timeout_s=int(raw.get("llm", {}).get("thinker_timeout_s", 90)),
         thinking_model=raw.get("llm", {}).get("thinking_model", "kimi-k3"),
         llm_local_only=bool(raw.get("llm", {}).get("local_only", False)),
         ollama_model=raw.get("llm", {}).get("ollama_model", "qwen2.5:3b"),
@@ -245,8 +294,25 @@ def load_config(path: Path | None = None) -> AssistantConfig:
             "token_file", "credentials/google_token.json"
         ),
     )
+    _apply_env_overrides(cfg)
+    cfg.schema_version = SCHEMA_VERSION
     _validate(cfg)
     return cfg
+
+
+def _apply_env_overrides(cfg: AssistantConfig) -> None:
+    """Environment wins over the YAML file (see module docstring table)."""
+    env = os.environ
+    if env.get("EXEC_ASSISTANT_TZ"):
+        cfg.timezone = env["EXEC_ASSISTANT_TZ"]
+    if env.get("EXEC_ASSISTANT_THINKING_MODEL"):
+        cfg.thinking_model = env["EXEC_ASSISTANT_THINKING_MODEL"]
+    if env.get("EXEC_ASSISTANT_EMAIL_PROVIDER"):
+        cfg.email_provider = env["EXEC_ASSISTANT_EMAIL_PROVIDER"]
+    if env.get("EXEC_ASSISTANT_CALENDAR_PROVIDER"):
+        cfg.calendar_provider = env["EXEC_ASSISTANT_CALENDAR_PROVIDER"]
+    if env.get("EXEC_ASSISTANT_QUIET_HOURS"):
+        cfg.quiet_hours = env["EXEC_ASSISTANT_QUIET_HOURS"]
 
 
 def _validate(cfg: AssistantConfig) -> None:
@@ -278,13 +344,16 @@ def save_config(cfg: AssistantConfig, path: Path | None = None) -> Path:
     path = path or config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     data: dict[str, Any] = {
-        "version": 2,
+        "version": SCHEMA_VERSION,
         "user": {"name": cfg.user_name, "timezone": cfg.timezone},
         "email": {
             "provider": cfg.email_provider,
             "permission": cfg.email_permission,
             "important_senders": cfg.important_senders,
             "routine_senders": cfg.routine_senders,
+            "vip_senders": cfg.vip_senders,
+            "unread_only": cfg.email_unread_only,
+            "daily_auto_send_limit": cfg.daily_auto_send_limit,
         },
         "calendar": {"provider": cfg.calendar_provider},
         "integrations": {  # kept for quick human scanning of non-provider toggles
@@ -305,12 +374,17 @@ def save_config(cfg: AssistantConfig, path: Path | None = None) -> Path:
             "evening_time": cfg.evening_time,
             "max_emails": cfg.max_emails,
             "max_tasks": cfg.max_tasks,
+            "quiet_hours": cfg.quiet_hours,
+            "section_order": cfg.briefing_section_order,
+            "weekend_sections": cfg.briefing_weekend_sections,
+            "max_lines": cfg.briefing_max_lines,
         },
         "llm": {
             "thinking_model": cfg.thinking_model,
             "local_only": cfg.llm_local_only,
             "ollama_model": cfg.ollama_model,
             "ollama_host": cfg.ollama_host,
+            "thinker_timeout_s": cfg.thinker_timeout_s,
         },
         "google": {
             "client_secret_file": cfg.google_client_secret_file,

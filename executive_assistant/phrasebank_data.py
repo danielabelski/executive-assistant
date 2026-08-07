@@ -1,4 +1,4 @@
-"""Phrasebank data — ~1,090 curated phrases/words, one tuple per row.
+"""Phrasebank data — ~1,220 curated phrases/words, one tuple per row.
 
 WHY THIS FILE EXISTS
 ---------------------
@@ -809,6 +809,194 @@ CHECKLIST_MARKER = [
     ("[ ]", "neutral"), ("[x]", "neutral"), ("✓", "neutral"), ("•", "neutral"),
     ("→", "brief"), ("⭐", "warm"), ("❗", "formal"), ("📌", "warm"),
 ]
+# ------------------------------------------------------- new: situational lines
+WEEKEND = [
+    ("It's the weekend — light agenda ahead.", "neutral"),
+    ("Weekend mode: only the essentials below.", "brief"),
+    ("The weekend is here. Enjoy the slower pace.", "warm"),
+    ("Saturday-style rules: nothing urgent unless it says so.", "playful"),
+    ("Weekend briefing — short and sweet.", "brief"),
+    ("No weekday hustle today; here's the light version.", "warm"),
+    ("Weekend ahead. Rest is on the agenda too.", "warm"),
+    ("Kicking off the weekend — here's what little there is.", "playful"),
+    ("A relaxed weekend rundown for you.", "formal"),
+    ("Weekend! Calendar's quiet, inbox can wait.", "playful"),
+    ("Two days off the treadmill — here's the view.", "neutral"),
+    ("Weekend edition: minimal commitments, maximum recovery.", "neutral"),
+    ("It's officially the weekend. Breathe easy.", "warm"),
+    ("Weekend summary, at your leisure.", "formal"),
+    ("Downshift complete — welcome to the weekend.", "playful"),
+]
+HOLIDAY = [
+    ("Happy {holiday}! Enjoy the day.", "warm"),
+    ("It's {holiday} — offices are quiet today.", "neutral"),
+    ("{holiday} today. Expect slower replies everywhere.", "brief"),
+    ("Wishing you a wonderful {holiday}.", "formal"),
+    ("{holiday}! Emails can definitely wait.", "playful"),
+    ("Today is {holiday}; the schedule reflects that.", "formal"),
+    ("{holiday} greetings! Light briefing for a light day.", "warm"),
+    ("Marking {holiday} — most of the world is off duty.", "neutral"),
+    ("{holiday} on the calendar; plan festivities accordingly.", "neutral"),
+    ("It's {holiday}. Go enjoy — I'll hold the fort.", "playful"),
+    ("A very happy {holiday} to you{name}.", "formal"),
+    ("{holiday} today — minimal agenda, maximum cheer.", "warm"),
+    ("Observing {holiday}; expect closures and quiet inboxes.", "formal"),
+    ("{holiday}! The only task today is to enjoy it.", "playful"),
+    ("Holiday hours in effect for {holiday}.", "brief"),
+]
+STREAK = [
+    ("That's {count} days in a row — keep it going!", "warm"),
+    ("{count}-day streak and counting.", "brief"),
+    ("Streak status: {count} days strong.", "neutral"),
+    ("{count} consecutive days. Impressive consistency.", "formal"),
+    ("{count} days straight! The streak is alive.", "playful"),
+    ("You've shown up {count} days running — nicely done.", "warm"),
+    ("Streak check: {count} days, no misses.", "neutral"),
+    ("{count} days unbroken. A record in the making.", "formal"),
+    ("Day {count} of the streak — don't break the chain!", "playful"),
+    ("Consistency report: {count} days and holding.", "neutral"),
+    ("{count}-day streak. Momentum is on your side.", "warm"),
+    ("{count} days in a row — quietly excellent.", "brief"),
+    ("The streak stands at {count} days.", "formal"),
+    ("{count} straight days! Someone's on fire.", "playful"),
+    ("Still going: {count} days consecutive.", "neutral"),
+]
+SNOOZE = [
+    ("Snoozed until {until} — out of sight for now.", "neutral"),
+    ("I'll remind you again {until}.", "brief"),
+    ("Parked until {until}; it will resurface then.", "formal"),
+    ("Okay, sleeping on it until {until}.", "playful"),
+    ("Snoozed. Next appearance: {until}.", "brief"),
+    ("Set aside until {until} — nothing lost.", "warm"),
+    ("Deferred to {until} as requested.", "formal"),
+    ("Snoozing that for now; back on {until}.", "neutral"),
+    ("Tucked away until {until}.", "playful"),
+    ("Reminder rescheduled to {until}.", "formal"),
+    ("On ice until {until} — consider it handled.", "warm"),
+    ("{until} it is. I'll bring it back then.", "neutral"),
+    ("Snooze engaged; wakeup call {until}.", "playful"),
+    ("Postponed to {until}, per your instruction.", "formal"),
+    ("Quiet until {until}, then it returns.", "brief"),
+]
+QUIET_HOURS = [
+    ("Quiet hours are on — holding non-urgent items.", "neutral"),
+    ("Shh mode active; only critical alerts get through.", "playful"),
+    ("Quiet hours in effect until {time}.", "brief"),
+    ("Do-not-disturb window: I'll keep it down.", "warm"),
+    ("Respecting quiet hours; summary will wait.", "formal"),
+    ("Silent running until {time} — urgent only.", "brief"),
+    ("Quiet hours observed. Nothing will ping you now.", "neutral"),
+    ("Low-noise mode: collecting, not interrupting.", "warm"),
+    ("Per your quiet-hours policy, this can wait.", "formal"),
+    ("Muting the routine stuff until {time}.", "playful"),
+]
+HEADLINE = [
+    ("Headline: {event}.", "brief"),
+    ("Top story today: {event}.", "neutral"),
+    ("If you remember one thing: {event}.", "warm"),
+    ("The big item is {event}.", "formal"),
+    ("Above the fold: {event}.", "playful"),
+    ("Today's headline — {event}.", "neutral"),
+    ("Leading with {event}.", "brief"),
+    ("Front and center: {event}.", "warm"),
+    ("Your day in one line: {event}.", "neutral"),
+    ("The headline act is {event}.", "playful"),
+    ("Priority one: {event}.", "formal"),
+    ("First things first — {event}.", "neutral"),
+    ("The one to watch: {event}.", "warm"),
+    ("Banner item: {event}.", "formal"),
+    ("Marquee today: {event}.", "playful"),
+]
+UMBRELLA = [
+    ("Umbrella verdict: yes, take one.", "brief"),
+    ("Bring the umbrella — rain is likely.", "neutral"),
+    ("Umbrella recommended; showers are on the radar.", "formal"),
+    ("Grab the brolly on your way out.", "playful"),
+    ("Rain incoming — umbrella advised.", "warm"),
+    ("No umbrella needed today; skies cooperate.", "neutral"),
+    ("Leave the umbrella — dry all day.", "brief"),
+    ("Umbrella optional; only a slight chance of rain.", "neutral"),
+    ("Pack the compact umbrella just in case.", "warm"),
+    ("Umbrella status: required equipment today.", "playful"),
+]
+CONFLICT = [
+    ("Heads-up: {event} overlaps with {title}.", "neutral"),
+    ("Scheduling conflict: {event} and {title} collide.", "formal"),
+    ("Clash alert — {event} vs {title}.", "playful"),
+    ("{event} conflicts with {title}; one may need to move.", "warm"),
+    ("Double-booked: {event} and {title}.", "brief"),
+    ("Calendar collision between {event} and {title}.", "neutral"),
+    ("Two claims on the same slot: {event}, {title}.", "formal"),
+    ("{event} runs into {title} — want me to suggest a fix?", "warm"),
+    ("Overlap detected: {event} meets {title}.", "brief"),
+    ("Uh-oh, {event} and {title} are fighting for the same hour.", "playful"),
+]
+VIP = [
+    ("VIP alert: message from {sender}.", "neutral"),
+    ("{sender} wrote — flagging as important.", "formal"),
+    ("Important sender: {sender} is in your inbox.", "brief"),
+    ("{sender} — that one's worth a fast reply.", "warm"),
+    ("Priority mail from {sender} just landed.", "playful"),
+    ("From your VIP list: {sender}.", "formal"),
+    ("{sender} reached out; marked high-priority.", "neutral"),
+    ("Don't miss this one — {sender}.", "warm"),
+    ("{sender} (VIP) awaits your attention.", "formal"),
+    ("Big-name sender spotted: {sender}.", "playful"),
+]
+NEXT_EVENT = [
+    ("Next up: {event} at {time}.", "neutral"),
+    ("Coming up next — {event}, {time}.", "brief"),
+    ("Your next commitment is {event} at {time}.", "formal"),
+    ("On deck: {event} at {time}.", "playful"),
+    ("Next on the calendar: {event} ({time}).", "neutral"),
+    ("{event} is next, starting {time}.", "brief"),
+    ("Up next — {event}. You're on at {time}.", "warm"),
+    ("The next item: {event}, scheduled {time}.", "formal"),
+    ("Rolling into {event} at {time}.", "playful"),
+    ("Next appointment: {event} at {time}.", "neutral"),
+    ("{event} awaits — {time} start.", "brief"),
+    ("Next in line: {event} at {time}. Plenty of time to prep.", "warm"),
+    ("Following this: {event}, {time}.", "formal"),
+    ("Queue position one: {event} at {time}.", "playful"),
+    ("Then it's {event} at {time}.", "neutral"),
+]
+# ------------------------------------------- extra greeting/closing variety
+GREETING_MORNING_EXTRA = [
+    ("Good morning{name}! The kettle of productivity is on.", "playful"),
+    ("Morning{name}! Priorities, weather, inbox — in that order if you like.", "neutral"),
+    ("Good morning{name}. A calm start to a full day.", "warm"),
+    ("Morning{name}. Your schedule, decoded.", "brief"),
+    ("Good morning{name}! Small steps, big day.", "warm"),
+    ("A bright morning to you{name}; briefing follows.", "formal"),
+    ("Morning{name}! I've done the sorting so you don't have to.", "playful"),
+    ("Good morning{name}! First coffee, then this.", "playful"),
+    ("Morning{name} — the day in sixty seconds.", "brief"),
+    ("Good morning{name}. Everything that matters, right here.", "formal"),
+]
+GREETING_EVENING_EXTRA = [
+    ("Good evening{name}! Tomorrow's already queued up.", "neutral"),
+    ("Evening{name}. Closing the books on today.", "formal"),
+    ("Evening{name}! You survived — here's the proof.", "playful"),
+    ("Good evening{name}. Tomorrow, previewed.", "brief"),
+    ("Evening{name}! Let's put a bow on today.", "warm"),
+    ("Good evening{name} — scores settled, plan made.", "playful"),
+    ("Evening{name}. Your day, tallied.", "brief"),
+    ("Good evening{name}! Rest well; the plan is ready.", "warm"),
+]
+CLOSING_LINE_EXTRA = [
+    ("That's the lot — onwards.", "brief"),
+    ("Consider yourself briefed. Go well.", "formal"),
+    ("All squared away. Enjoy your day.", "warm"),
+    ("Nothing else needs you right now.", "neutral"),
+    ("That's everything — I'm on watch.", "playful"),
+    ("Briefing complete. The day is yours.", "formal"),
+    ("You know everything I know now.", "playful"),
+    ("Wrapped up — ping me anytime.", "warm"),
+    ("End of the list; start of the doing.", "playful"),
+    ("That's all — make it a good one.", "warm"),
+    ("Nothing further to report.", "formal"),
+    ("All caught up. Carry on.", "brief"),
+]
 # fmt: on
 
 # Flatten into the (category, text, tone) rows the builder consumes.
@@ -880,7 +1068,28 @@ ENTRIES: list[tuple[str, str, str]] = (
     + [("month_word", *r) for r in MONTH_WORD]
     + [("closing_line", *r) for r in CLOSING_LINE]
     + [("opening_line", *r) for r in OPENING_LINE]
+    + [("weekend", *r) for r in WEEKEND]
+    + [("holiday", *r) for r in HOLIDAY]
+    + [("streak", *r) for r in STREAK]
+    + [("snooze", *r) for r in SNOOZE]
+    + [("quiet_hours", *r) for r in QUIET_HOURS]
+    + [("headline", *r) for r in HEADLINE]
+    + [("umbrella", *r) for r in UMBRELLA]
+    + [("conflict", *r) for r in CONFLICT]
+    + [("vip", *r) for r in VIP]
+    + [("next_event", *r) for r in NEXT_EVENT]
+    + [("greeting_morning", *r) for r in GREETING_MORNING_EXTRA]
+    + [("greeting_evening", *r) for r in GREETING_EVENING_EXTRA]
+    + [("closing_line", *r) for r in CLOSING_LINE_EXTRA]
     + [("checklist_marker", *r) for r in CHECKLIST_MARKER]
 )
 
 CATEGORIES = sorted({cat for cat, _, _ in ENTRIES})
+
+#: Every slot a template may reference. validate_slots() flags any template
+#: using a name outside this set — a typo'd slot would render as a silent ''.
+KNOWN_SLOTS = sorted({
+    "name", "count", "temp", "unit", "chance", "cond", "title", "sender",
+    "subject", "source", "reason", "time", "city", "streak", "date",
+    "project", "minutes", "event", "limit", "holiday", "until",
+})

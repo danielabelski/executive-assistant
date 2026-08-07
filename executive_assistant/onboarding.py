@@ -32,6 +32,7 @@ from executive_assistant.config import (
     CalendarProvider,
     EmailPermission,
     EmailProvider,
+    load_config,
     save_config,
 )
 from executive_assistant.secrets import set_secret
@@ -288,6 +289,14 @@ def run_onboarding(input_func: InputFunc = input,
     cfg.morning_time = _ask("Morning briefing time (24h)", cfg.morning_time, input_func, out)
     cfg.evening_time = _ask("Evening wrap-up time (24h)", cfg.evening_time, input_func, out)
 
+    # 9) REVIEW & CONFIRM — see the whole policy before anything is written.
+    # A surprise here costs a re-run; a review screen costs one keypress.
+    if not _review_and_confirm(cfg, input_func, out):
+        out("")
+        out("No problem — starting over. (Your previous config file is untouched.)")
+        return run_onboarding(input_func=input_func, out=out, save=save,
+                              probe_services=probe_services)
+
     # Save + side effects ------------------------------------------------------------------------
     if save:
         path = save_config(cfg)
@@ -298,6 +307,127 @@ def run_onboarding(input_func: InputFunc = input,
         if cfg.calendar_provider == CalendarProvider.LOCAL_ICS:
             _ensure_ics_file(cfg, out)
         _print_next_steps(cfg, out)
+    return cfg
+
+
+def _review_summary(cfg: AssistantConfig) -> list[str]:
+    """One line per choice — the contract the user is about to sign."""
+    lines = [
+        f"user/timezone:      {cfg.user_name} · {cfg.timezone}",
+        f"email provider:     {cfg.email_provider}",
+    ]
+    if cfg.email_enabled:
+        lines.append(f"email permission:   {cfg.email_permission}")
+    lines.append(f"calendar provider:  {cfg.calendar_provider}")
+    lines.append(
+        "integrations:       "
+        + ", ".join(
+            name for name, on in [("tasks", cfg.tasks_enabled),
+                                  ("weather", cfg.weather_enabled),
+                                  ("github", cfg.github_enabled)] if on
+        ) or "none"
+    )
+    if cfg.weather_enabled:
+        lines.append(f"weather location:   {cfg.weather_label}")
+    if cfg.llm_local_only:
+        lines.append(f"thinking model:     LOCAL ONLY — ollama:{cfg.ollama_model}")
+    else:
+        lines.append(f"thinking model:     {cfg.thinking_model} (cloud)")
+    lines.append(f"briefing times:     {cfg.morning_time} / {cfg.evening_time}")
+    return lines
+
+
+def _review_and_confirm(cfg: AssistantConfig, input_func: InputFunc,
+                        out: OutputFunc) -> bool:
+    out("")
+    out("=" * 68)
+    out("  REVIEW — this is what the assistant will do. Nothing is written yet.")
+    out("=" * 68)
+    for i, line in enumerate(_review_summary(cfg), 1):
+        out(f"  {i:2}. {line}")
+    out("")
+    return _ask_yes_no("Write this configuration?", True, input_func, out)
+
+
+#: Sections `run_section` can re-run against an existing config. Each maps to
+#: the same questions the full wizard asks — changing your mind about ONE
+#: integration shouldn't mean re-answering all of them.
+SECTIONS = ("email", "calendar", "weather", "llm", "tasks")
+
+
+def run_section(section: str, input_func: InputFunc = input,
+                out: OutputFunc = print, save: bool = True) -> AssistantConfig:
+    """Re-run ONE wizard section against the existing config, preserving the rest."""
+    if section not in SECTIONS:
+        raise ValueError(f"unknown section {section!r} — pick from {SECTIONS}")
+    cfg = load_config()
+    out(f"Re-running just the '{section}' section; everything else is preserved.")
+
+    if section == "email":
+        cfg.email_provider = _ask_choice(
+            "Which email account should the assistant use?",
+            {
+                EmailProvider.GMAIL: "Gmail — Google OAuth",
+                EmailProvider.IMAP: "Any IMAP+SMTP account",
+                EmailProvider.NONE: "None — no email integration",
+            },
+            cfg.email_provider, input_func, out,
+        )
+        if cfg.email_provider == EmailProvider.IMAP:
+            _collect_imap_details(cfg, input_func, out)
+        if cfg.email_enabled:
+            _collect_permission(cfg, input_func, out)
+    elif section == "calendar":
+        cfg.calendar_provider = _ask_choice(
+            "Which calendar should the assistant read?",
+            {
+                CalendarProvider.GOOGLE: "Google Calendar",
+                CalendarProvider.CALDAV: "CalDAV server",
+                CalendarProvider.LOCAL_ICS: "Local .ics file",
+                CalendarProvider.NONE: "None",
+            },
+            cfg.calendar_provider, input_func, out,
+        )
+        if cfg.calendar_provider == CalendarProvider.CALDAV:
+            _collect_caldav_details(cfg, input_func, out)
+        elif cfg.calendar_provider == CalendarProvider.LOCAL_ICS:
+            cfg.local_ics_path = _ask("Path for the calendar file",
+                                      cfg.local_ics_path, input_func, out)
+    elif section == "weather":
+        cfg.weather_enabled = _ask_yes_no(
+            "Weather — US National Weather Service forecast?",
+            cfg.weather_enabled, input_func, out)
+        if cfg.weather_enabled:
+            zip_code = _ask("Your ZIP code (US)", cfg.weather_zip or "97201",
+                            input_func, out)
+            try:
+                lat, lon, label = resolve_zip(zip_code)
+                cfg.weather_zip, cfg.weather_lat, cfg.weather_lon, cfg.weather_label = (
+                    zip_code, lat, lon, label)
+                out(f"  → Resolved to {label} ({lat}, {lon})")
+            except WeatherError as exc:
+                out(f"  ⚠ {exc}")
+                cfg.weather_enabled = False
+    elif section == "llm":
+        out("  1) Cloud model   2) Local Ollama ONLY")
+        current = "2" if cfg.llm_local_only else "1"
+        choice = _ask("Choose 1 or 2", current, input_func, out).strip()
+        if choice == "2":
+            cfg.llm_local_only = True
+            cfg.ollama_model = _ask("Ollama model for thinking", cfg.ollama_model,
+                                    input_func, out)
+            cfg.ollama_host = _ask("Ollama host", cfg.ollama_host, input_func, out)
+        else:
+            cfg.llm_local_only = False
+            cfg.thinking_model = _ask("Model for the thinking parts",
+                                      cfg.thinking_model, input_func, out)
+    elif section == "tasks":
+        cfg.tasks_enabled = _ask_yes_no(
+            "Local task file (tasks.md)?", cfg.tasks_enabled, input_func, out)
+
+    if save:
+        path = save_config(cfg)
+        out(f"✓ Updated {path}")
     return cfg
 
 

@@ -21,7 +21,7 @@ from email.mime.text import MIMEText
 from googleapiclient.discovery import build
 
 from executive_assistant.google_auth import load_credentials
-from executive_assistant.types import EmailSummary
+from executive_assistant.types import EmailSummary, flag_vips
 
 
 class GmailClient:
@@ -41,8 +41,14 @@ class GmailClient:
                    important_senders=config.important_senders)
 
     # --- reading -------------------------------------------------------------
-    def search(self, query: str, max_results: int = 10) -> list[EmailSummary]:
-        """Gmail search syntax, e.g. 'is:unread newer_than:1d'."""
+    def search(self, query: str, max_results: int = 10,
+               limit: int | None = None) -> list[EmailSummary]:
+        """Gmail search syntax, e.g. 'is:unread newer_than:1d'.
+
+        `limit` is the interface-standard name; it overrides `max_results`.
+        """
+        if limit is not None:
+            max_results = limit
         resp = (
             self._svc.users()
             .messages()
@@ -79,6 +85,35 @@ class GmailClient:
             "in:inbox is:unread -category:promotions -category:social -category:forums",
             max_results=max_results,
         )
+
+    def unread_count(self) -> int:
+        """Cheap unread count — one labels.get, no message fetches."""
+        label = (
+            self._svc.users().labels().get(userId="me", id="UNREAD").execute()
+        )
+        return int(label.get("messagesUnread", 0))
+
+    def vip_flag(self, messages: list, vip_senders: list[str]) -> list:
+        """Mark messages from VIP senders with 'vip': True (same list back)."""
+        return flag_vips(messages, vip_senders)
+
+    def draft_exists(self, subject_substr: str) -> bool:
+        """True when any existing draft's subject contains the substring
+        (case-insensitive) — prevents duplicate 'did you reply?' drafts."""
+        resp = self._svc.users().drafts().list(userId="me").execute()
+        needle = subject_substr.lower()
+        for stub in resp.get("drafts", []):
+            draft = (
+                self._svc.users()
+                .drafts()
+                .get(userId="me", id=stub["id"], format="metadata")
+                .execute()
+            )
+            headers = {h["name"]: h["value"]
+                       for h in draft["message"]["payload"]["headers"]}
+            if needle in headers.get("Subject", "").lower():
+                return True
+        return False
 
     def get_body(self, message_id: str, max_chars: int = 4000) -> str:
         """Full plain-text body of one message (prefers text/plain parts)."""

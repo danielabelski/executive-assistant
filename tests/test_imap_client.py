@@ -135,3 +135,70 @@ class TestHelpers:
     def test_literals_extraction(self):
         first, second = _literals(fetch_payload(b"one", b"two"))
         assert (first, second) == (b"one", b"two")
+
+
+# --- #39-45: unread_count / search / vip_flag / draft_exists -----------------------
+
+DRAFT_HEADERS = (b"From: me@example.com\r\n"
+                 b"Subject: Re: Follow up with supplier\r\n"
+                 b"Date: Fri, 17 Jul 2026 18:00:00 -0700\r\n\r\n")
+
+
+class TestUnreadCount:
+    def test_counts_unseen_uids(self):
+        fake = FakeIMAP(uids=(b"101", b"102", b"103"))
+        assert client_for(fake).unread_count() == 3
+
+    def test_empty_inbox_is_zero(self):
+        fake = FakeIMAP(uids=())
+        assert client_for(fake).unread_count() == 0
+
+    def test_logout_always_called(self):
+        fake = FakeIMAP(uids=(b"101",))
+        client_for(fake).unread_count()
+        assert fake.logged_out
+
+
+class TestSearch:
+    def test_returns_summaries_newest_first(self):
+        fake = FakeIMAP(fetch_map={"101": fetch_payload(HEADERS_RAW, b"a"),
+                                   "102": fetch_payload(HEADERS_RAW, b"b")})
+        results = client_for(fake).search("meeting", limit=5)
+        assert [r.id for r in results] == ["102", "101"]
+        assert results[0].subject == "Schedule change"  # same shape as unread
+
+    def test_limit_truncates(self):
+        fake = FakeIMAP(uids=(b"101", b"102", b"103"),
+                        fetch_map={u: fetch_payload(HEADERS_RAW, b"")
+                                   for u in ("101", "102", "103")})
+        results = client_for(fake).search("meeting", limit=2)
+        assert [r.id for r in results] == ["103", "102"]
+
+
+class TestVipFlag:
+    def test_flags_vip_senders_case_insensitive(self):
+        fake = FakeIMAP(uids=(b"101",), fetch_map={"101": fetch_payload(HEADERS_RAW, b"")})
+        client = client_for(fake)
+        messages = client.unread_for_briefing()
+        result = client.vip_flag(messages, ["CLIENT@Y.com"])
+        assert result is messages
+        assert messages[0].vip is True
+
+    def test_non_vip_untouched(self):
+        fake = FakeIMAP(uids=(b"101",), fetch_map={"101": fetch_payload(HEADERS_RAW, b"")})
+        client = client_for(fake)
+        messages = client.vip_flag(client.unread_for_briefing(), ["boss@z.com"])
+        assert not hasattr(messages[0], "vip")
+
+
+class TestDraftExists:
+    def test_subject_substring_case_insensitive(self):
+        fake = FakeIMAP(uids=(b"201",), fetch_map={"201": fetch_payload(DRAFT_HEADERS)})
+        client = client_for(fake)
+        assert client.draft_exists("follow up") is True
+        assert client.draft_exists("SUPPLIER") is True
+        assert client.draft_exists("different topic") is False
+
+    def test_empty_drafts_folder(self):
+        fake = FakeIMAP(uids=())
+        assert client_for(fake).draft_exists("anything") is False

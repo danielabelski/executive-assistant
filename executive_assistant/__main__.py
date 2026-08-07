@@ -14,6 +14,8 @@ Hermes cron calls `briefing` and `wrapup`; you use the rest.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -28,9 +30,12 @@ from executive_assistant.config import (
 
 
 def _cmd_onboard(_args) -> int:
-    from executive_assistant.onboarding import run_onboarding
+    from executive_assistant.onboarding import run_onboarding, run_section
 
-    run_onboarding()
+    if getattr(_args, "only", None):
+        run_section(_args.only)
+    else:
+        run_onboarding()
     return 0
 
 
@@ -112,6 +117,41 @@ def _cmd_doctor(_args) -> int:
     except ConfigError as exc:
         print(f"  ✗ {exc}")
         return 1
+
+    # --- local plumbing: data dir, phrasebank integrity, task file parses ----
+    from executive_assistant import paths
+
+    d = paths.data_dir()
+    writable = os.access(d, os.W_OK)
+    print(f"  {'✓' if writable else '✗ not writable'} data dir ({d})")
+    ok &= writable
+    if paths.last_warning:
+        print(f"    ⚠ {paths.last_warning}")
+
+    try:
+        from executive_assistant.phrasebank import PhraseBank
+
+        pb = PhraseBank()
+        n, ncats = pb.count(), len(pb.categories())
+        bad_slots = pb.validate_slots()
+        if bad_slots:
+            print(f"  ✗ phrasebank — {len(bad_slots)} template(s) with unknown slots")
+            ok = False
+        else:
+            print(f"  ✓ phrasebank — {n} phrases across {ncats} categories")
+    except Exception as exc:
+        print(f"  ✗ phrasebank failed — {exc}")
+        ok = False
+
+    if cfg.tasks_enabled and cfg.tasks_file.exists():
+        try:
+            from executive_assistant.tasks_client import TaskFile
+
+            TaskFile.load(cfg.tasks_file)
+            print(f"  ✓ task file parses ({cfg.tasks_file})")
+        except Exception as exc:
+            print(f"  ✗ task file won't parse — {exc}")
+            ok = False
 
     # --- email provider -------------------------------------------------------
     if cfg.email_provider == EmailProvider.GMAIL:
@@ -227,7 +267,16 @@ def _cmd_briefing(_args) -> int:
     from executive_assistant.briefing import MorningBriefing
 
     try:
-        print(MorningBriefing(load_config()).render_text())
+        briefing = MorningBriefing(load_config())
+        if getattr(_args, "json", False):
+            sections = [
+                {"title": s.title, "lines": s.lines, "error": s.error}
+                for s in briefing.sections()
+            ]
+            print(json.dumps({"kind": "briefing", "sections": sections},
+                             ensure_ascii=False))
+        else:
+            print(briefing.render_text())
         return 0
     except ConfigError as exc:
         print(exc)
@@ -238,11 +287,58 @@ def _cmd_wrapup(_args) -> int:
     from executive_assistant.briefing import EveningWrapUp
 
     try:
-        print(EveningWrapUp(load_config()).render_text())
+        wrap = EveningWrapUp(load_config())
+        if getattr(_args, "json", False):
+            from datetime import date as _date
+
+            tf = wrap._load()
+            payload = {
+                "kind": "wrapup",
+                "completed_today": [t.title for t in tf.completed_today(_date.today())],
+                "open": [t.title for t in tf.open_tasks()],
+                "suggested": [t.title for t in tf.prioritized()[:3]],
+            }
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(wrap.render_text())
         return 0
     except ConfigError as exc:
         print(exc)
         return 1
+
+
+def _cmd_approve(args) -> int:
+    """`approve --explain <action>` — why would the gate rule that way?
+    Turns policy into prose you can check BEFORE the 7 AM send."""
+    from executive_assistant.approval import explain
+
+    try:
+        cfg = load_config()
+    except ConfigError as exc:
+        print(exc)
+        return 1
+    print(explain(args.explain, cfg))
+    return 0
+
+
+def _cmd_phrasebank(_args) -> int:
+    """Category counts + most-rendered phrases (the usage-stats table)."""
+    from executive_assistant.phrasebank import PhraseBank
+
+    pb = PhraseBank()
+    counts = pb.category_counts()
+    print(f"{sum(n for _, n in counts)} phrases across {len(counts)} categories\n")
+    print("Largest categories:")
+    for name, n in sorted(counts, key=lambda kv: -kv[1])[:10]:
+        print(f"  {n:4}  {name}")
+    top = pb.stats(limit=10)
+    if top:
+        print("\nMost rendered:")
+        for category, text, n in top:
+            print(f"  {n:4}× [{category}] {text[:60]}")
+    else:
+        print("\n(no renders recorded yet — usage stats accumulate as briefings run)")
+    return 0
 
 
 def _cmd_tasks(args) -> int:
@@ -283,13 +379,30 @@ def _cmd_tasks(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="executive_assistant",
                                      description="Personal executive assistant")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument("--version", action="store_true",
+                        help="print the version and exit")
+    sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("onboard", help="run the setup wizard")
+    onboard_p = sub.add_parser("onboard", help="run the setup wizard")
+    onboard_p.add_argument("--only", metavar="SECTION",
+                           choices=["email", "calendar", "weather", "llm", "tasks"],
+                           help="re-run just one section of the wizard")
     sub.add_parser("auth", help="Google OAuth walkthrough")
     sub.add_parser("doctor", help="health check")
-    sub.add_parser("briefing", help="print the morning briefing")
-    sub.add_parser("wrapup", help="print the evening wrap-up")
+    brief_p = sub.add_parser("briefing", help="print the morning briefing")
+    brief_p.add_argument("--json", action="store_true",
+                         help="machine-readable JSON instead of prose")
+    wrap_p = sub.add_parser("wrapup", help="print the evening wrap-up")
+    wrap_p.add_argument("--json", action="store_true",
+                        help="machine-readable JSON instead of prose")
+
+    phrase_p = sub.add_parser("phrasebank", help="phrasebank stats")
+    phrase_p.add_argument("--stats", action="store_true",
+                          help="category counts + most-rendered phrases")
+
+    approve_p = sub.add_parser("approve", help="approval-gate introspection")
+    approve_p.add_argument("--explain", metavar="ACTION",
+                           help="explain the ruling for an action (e.g. send_email)")
 
     tasks_p = sub.add_parser("tasks", help="manage the local task file")
     tasks_sub = tasks_p.add_subparsers(dest="tasks_command", required=True)
@@ -302,6 +415,14 @@ def main(argv: list[str] | None = None) -> int:
     done_p.add_argument("fragment", help="text from the task title")
 
     args = parser.parse_args(argv)
+    if args.version:
+        from executive_assistant import __version__
+
+        print(__version__)
+        return 0
+    if not args.command:
+        parser.print_help()
+        return 1
     handlers = {
         "onboard": _cmd_onboard,
         "auth": _cmd_auth,
@@ -309,6 +430,8 @@ def main(argv: list[str] | None = None) -> int:
         "briefing": _cmd_briefing,
         "wrapup": _cmd_wrapup,
         "tasks": _cmd_tasks,
+        "phrasebank": _cmd_phrasebank,
+        "approve": _cmd_approve,
     }
     return handlers[args.command](args)
 

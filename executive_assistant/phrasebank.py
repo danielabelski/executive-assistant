@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS phrases (
 );
 CREATE INDEX IF NOT EXISTS idx_category ON phrases(category);
 CREATE INDEX IF NOT EXISTS idx_cat_tone ON phrases(category, tone);
+CREATE TABLE IF NOT EXISTS phrase_usage (
+    phrase_id   INTEGER NOT NULL,
+    rendered_on TEXT NOT NULL    -- ISO date; one row per render
+);
+CREATE INDEX IF NOT EXISTS idx_usage_phrase ON phrase_usage(phrase_id);
 """
 
 
@@ -73,6 +78,17 @@ class PhraseBank:
             if not autobuild:
                 raise PhraseBankError(f"No phrasebank DB at {self.db_path}")
             build_db(self.db_path)
+        else:
+            # Older DBs predate phrase_usage — migrate in place, never rebuild
+            # (a rebuild would lose the user's accumulated stats).
+            with self._connect() as conn:
+                conn.executescript(
+                    "CREATE TABLE IF NOT EXISTS phrase_usage ("
+                    " phrase_id INTEGER NOT NULL,"
+                    " rendered_on TEXT NOT NULL);"
+                    "CREATE INDEX IF NOT EXISTS idx_usage_phrase"
+                    " ON phrase_usage(phrase_id);"
+                )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
@@ -90,6 +106,46 @@ class PhraseBank:
 
     def categories(self) -> list[str]:
         return list(CATEGORIES)
+
+    def category_counts(self) -> list[tuple[str, int]]:
+        """(category, row count) pairs — powers `phrasebank --stats`."""
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT category, COUNT(*) FROM phrases"
+                " GROUP BY category ORDER BY category"
+            ).fetchall()
+
+    def stats(self, limit: int = 20) -> list[tuple[str, str, int]]:
+        """Most-rendered phrases: (category, text, times_used).
+
+        The point: phrases that never render are candidates for pruning, and
+        hot ones tell you which categories deserve more variants.
+        """
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT p.category, p.text, COUNT(u.phrase_id) AS n"
+                " FROM phrase_usage u JOIN phrases p ON p.id = u.phrase_id"
+                " GROUP BY u.phrase_id ORDER BY n DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+
+    def validate_slots(self) -> list[str]:
+        """Templates whose {slots} can't be filled from the shared slot set.
+
+        Returns offending templates (empty list = healthy). A phrase that
+        references a slot no caller ever passes would render a silent '' —
+        this makes that loud at doctor/seed time instead.
+        """
+        from executive_assistant.phrasebank_data import KNOWN_SLOTS
+
+        bad = []
+        with self._connect() as conn:
+            rows = conn.execute("SELECT text FROM phrases").fetchall()
+        for (text,) in rows:
+            unknown = set(_slot_names(text)) - set(KNOWN_SLOTS)
+            if unknown:
+                bad.append(f"{text!r} references unknown slot(s): {sorted(unknown)}")
+        return bad
 
     def all(self, category: str, tone: str | None = None) -> list[str]:
         sql = "SELECT text FROM phrases WHERE category=?"
@@ -115,7 +171,28 @@ class PhraseBank:
         if not choices:
             raise PhraseBankError(f"Unknown or empty category: {category!r}")
         pick = (rng or random).choice(choices)
+        self._record_usage(category, pick)
         return _render(pick, slots)
+
+    def _record_usage(self, category: str, text: str) -> None:
+        """One row per render. Stats are nice-to-have — a hiccup here must
+        never break a briefing, so failures are swallowed by design."""
+        try:
+            from datetime import date
+
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT id FROM phrases WHERE category=? AND text=?",
+                    (category, text),
+                ).fetchone()
+                if row:
+                    conn.execute(
+                        "INSERT INTO phrase_usage (phrase_id, rendered_on)"
+                        " VALUES (?, ?)",
+                        (row[0], date.today().isoformat()),
+                    )
+        except Exception:
+            pass
 
 
 def _render(template: str, slots: dict) -> str:
@@ -135,5 +212,6 @@ def _slot_names(template: str) -> list[str]:
         end = template.find("}", start)
         if end == -1:
             return names
-        names.append(template[start + 1:end])
+        # '{date:%A}' — the format spec belongs to the caller, not the slot name
+        names.append(template[start + 1:end].split(":", 1)[0])
         i = end

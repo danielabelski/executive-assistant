@@ -28,7 +28,12 @@ from executive_assistant.config import AssistantConfig
 #: Short outputs only — jobs demand terse replies ("ONLY the numbers").
 GENERATE_TIMEOUT = 90          # seconds; a 3B model on Jetson needs headroom
 TAGS_TIMEOUT = 5
+MAX_RETRIES = 2                # transient hiccups shouldn't trigger fallback
 PRIORITY_RANK = {"high": 0, "normal": 1, "low": 2}
+
+#: Injectable for tests — retry backoff shouldn't slow the suite down.
+_sleep = __import__("time").sleep
+_random_uniform = __import__("random").uniform
 
 #: Generic body used when a draft is needed but no model is available.
 DRAFT_FALLBACK_BODY = (
@@ -59,25 +64,49 @@ def ollama_model_pulled(model: str, host: str) -> bool:
     return model in names or f"{model}:latest" in names
 
 
-def ollama_generate(prompt: str, model: str, host: str) -> str:
+def ollama_generate(prompt: str, model: str, host: str,
+                    timeout: int = GENERATE_TIMEOUT,
+                    retries: int = MAX_RETRIES) -> str:
     """One completion from a local model. Low temperature: jobs want
-    decisions, not prose."""
+    decisions, not prose.
+
+    Transient failures (timeout, connection reset) are retried with
+    exponential backoff + jitter before we give up and let the caller
+    fall back — a Jetson under load sometimes answers slowly, and one
+    slow answer shouldn't cost us the model's judgment.
+    """
     payload = {
         "model": model,
         "prompt": prompt,
         "stream": False,
         "options": {"temperature": 0.2, "num_predict": 150},
     }
-    try:
-        resp = requests.post(f"{host.rstrip('/')}/api/generate",
-                             json=payload, timeout=GENERATE_TIMEOUT)
-        resp.raise_for_status()
-    except requests.RequestException as exc:
-        raise OllamaError(f"Ollama generate failed: {exc}") from exc
+    last_exc: requests.RequestException | None = None
+    for attempt in range(retries + 1):
+        try:
+            resp = requests.post(f"{host.rstrip('/')}/api/generate",
+                                 json=payload, timeout=timeout)
+            resp.raise_for_status()
+            break
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt < retries:
+                _sleep((2 ** attempt) + _random_uniform(0, 0.5))
+    else:
+        raise OllamaError(f"Ollama generate failed: {last_exc}") from last_exc
     text = resp.json().get("response", "").strip()
     if not text:
         raise OllamaError("Ollama returned an empty response")
     return text
+
+
+def model_available(model: str, host: str) -> bool:
+    """Preflight for doctor: is `model` pulled at `host`? Never raises —
+    a doctor check that crashes tells you nothing."""
+    try:
+        return ollama_model_pulled(model, host)
+    except OllamaError:
+        return False
 
 
 # --- Result type -----------------------------------------------------------------
@@ -97,6 +126,8 @@ class Thinker:
         self.cfg = cfg
         self.host = cfg.ollama_host
         self.model = cfg.ollama_model
+        #: Set after every run() — callers (wrap-up) can label output honestly.
+        self.last_used_fallback: bool = False
 
     @property
     def local_only(self) -> bool:
@@ -110,25 +141,35 @@ class Thinker:
         except OllamaError:
             return {"reachable": False, "model_pulled": False, "model": self.model}
 
-    def run(self, job: ThinkingJob) -> ThinkingOutcome | None:
+    def run(self, job: ThinkingJob,
+            timeout: int | None = None) -> ThinkingOutcome | None:
         """Execute a job per policy.
 
         Returns None in cloud mode — the caller (Hermes / active model) is
         expected to execute the job itself. In local_only mode, ALWAYS
         returns an outcome: a validated Ollama answer if healthy, else the
         deterministic fallback (marked by engine name). Zero fees either way.
+
+        `timeout` overrides GENERATE_TIMEOUT (e.g. cfg.thinker_timeout_s) —
+        a hard ceiling so a hung model can't stall a 7 AM briefing.
         """
         if not self.local_only:
             return None
+        budget = timeout if timeout is not None else getattr(
+            self.cfg, "thinker_timeout_s", None) or GENERATE_TIMEOUT
         try:
-            raw = ollama_generate(job.prompt, self.model, self.host)
+            raw = ollama_generate(job.prompt, self.model, self.host,
+                                  timeout=budget)
         except OllamaError:
+            self.last_used_fallback = True
             return ThinkingOutcome(text=deterministic_fallback(job, self.cfg),
                                    engine="fallback(ollama-down)")
         normalized = validate_and_normalize(job, raw)
         if normalized is not None:
+            self.last_used_fallback = False
             return ThinkingOutcome(text=normalized, engine=f"ollama:{self.model}")
         # Model answered garbage (small models do) — heuristics win this round.
+        self.last_used_fallback = True
         return ThinkingOutcome(text=deterministic_fallback(job, self.cfg),
                                engine="fallback(ollama-invalid)")
 

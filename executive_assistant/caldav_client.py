@@ -30,7 +30,7 @@ from defusedxml import ElementTree as ET  # safe against XXE/billion-laughs:
                                           # this XML arrives from a remote server
 
 from executive_assistant.ics_util import parse_vevents, serialize_event, vevent_to_event_dict
-from executive_assistant.types import Event
+from executive_assistant.types import Event, next_up
 
 TIMEOUT = 20
 
@@ -88,6 +88,10 @@ class CalDavCalendar:
         now = datetime.now(self.tz)
         start = datetime.combine(now.date(), time.min).replace(tzinfo=self.tz)
         return self.events_between(start, start + timedelta(days=1))
+
+    def next_event(self, now: datetime | None = None) -> tuple[Event, int] | None:
+        """Next timed event today → (event, minutes_until); None if none left."""
+        return next_up(self.events_today(), now or datetime.now(self.tz))
 
     def events_between(self, start: datetime, end: datetime) -> list[Event]:
         xml_text = self._report(self._calendar_query(start, end))

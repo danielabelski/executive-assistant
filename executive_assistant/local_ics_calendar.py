@@ -23,7 +23,7 @@ from executive_assistant.ics_util import (
     serialize_event,
     vevent_to_event_dict,
 )
-from executive_assistant.types import Event
+from executive_assistant.types import Event, next_up
 
 
 class LocalIcsCalendar:
@@ -43,6 +43,10 @@ class LocalIcsCalendar:
         now = datetime.now(self.tz)
         start = datetime.combine(now.date(), time.min).replace(tzinfo=self.tz)
         return self.events_between(start, start + timedelta(days=1))
+
+    def next_event(self, now: datetime | None = None) -> tuple[Event, int] | None:
+        """Next timed event today → (event, minutes_until); None if none left."""
+        return next_up(self.events_today(), now or datetime.now(self.tz))
 
     def events_between(self, start: datetime, end: datetime) -> list[Event]:
         """Events overlapping [start, end). Naive file times are compared as

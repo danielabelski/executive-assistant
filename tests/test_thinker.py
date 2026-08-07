@@ -9,6 +9,7 @@ import requests
 from executive_assistant.composer import ThinkingJob
 from executive_assistant.config import AssistantConfig
 from executive_assistant.thinker import (
+    model_available,
     DRAFT_FALLBACK_BODY,
     OllamaError,
     Thinker,
@@ -142,3 +143,92 @@ class TestParseRanking:
 
     def test_empty_on_garbage(self):
         assert parse_ranking("no numbers here", 5) == []
+
+
+class TestRetryWithBackoff:
+    """One slow answer on a loaded Jetson shouldn't cost us the model's
+    judgment — transient errors retry with backoff before falling back."""
+
+    def _failing_post(self, failures):
+        """A requests.post stand-in that raises `failures` times then succeeds."""
+        calls = {"n": 0}
+        ok = MagicMock()
+        ok.json.return_value = {"response": "1, 2, 3"}
+        ok.raise_for_status.return_value = None
+
+        def fake_post(*a, **kw):
+            calls["n"] += 1
+            if calls["n"] <= failures:
+                raise requests.ConnectionError("reset by peer")
+            return ok
+
+        return fake_post, calls
+
+    def test_succeeds_after_transient_failures(self):
+        fake, calls = self._failing_post(failures=2)
+        with patch("executive_assistant.thinker.requests.post", fake), \
+             patch("executive_assistant.thinker._sleep") as snooze:
+            text = ollama_generate("p", "m", HOST)
+        assert text == "1, 2, 3"
+        assert calls["n"] == 3
+        assert snooze.call_count == 2          # backoff between attempts
+
+    def test_gives_up_after_max_retries(self):
+        fake, calls = self._failing_post(failures=99)
+        with patch("executive_assistant.thinker.requests.post", fake), \
+             patch("executive_assistant.thinker._sleep"):
+            with pytest.raises(OllamaError):
+                ollama_generate("p", "m", HOST)
+        assert calls["n"] == 3                 # initial + MAX_RETRIES
+
+    def test_backoff_is_exponential(self):
+        fake, _ = self._failing_post(failures=2)
+        with patch("executive_assistant.thinker.requests.post", fake), \
+             patch("executive_assistant.thinker._sleep") as snooze, \
+             patch("executive_assistant.thinker._random_uniform", return_value=0.0):
+            ollama_generate("p", "m", HOST)
+        waits = [c.args[0] for c in snooze.call_args_list]
+        assert waits[0] < waits[1]             # 1s then 2s (jitter stubbed out)
+
+
+class TestModelAvailablePreflight:
+    def test_true_when_pulled(self):
+        resp = MagicMock()
+        resp.json.return_value = {"models": [{"name": "qwen2.5:3b"}]}
+        resp.raise_for_status.return_value = None
+        with patch("executive_assistant.thinker.requests.get", return_value=resp):
+            assert model_available("qwen2.5:3b", HOST) is True
+
+    def test_false_when_unreachable_never_raises(self):
+        with patch("executive_assistant.thinker.requests.get",
+                   side_effect=requests.ConnectionError("down")):
+            assert model_available("qwen2.5:3b", HOST) is False
+
+
+class TestTimeoutAndFallbackFlag:
+    def test_run_plumbs_timeout_to_http(self):
+        c = cfg(llm_local_only=True, thinker_timeout_s=42)
+        t = Thinker(c)
+        with patch("executive_assistant.thinker.requests.post") as post:
+            post.return_value.json.return_value = {"response": "1, 2"}
+            post.return_value.raise_for_status.return_value = None
+            t.run(ThinkingJob("prioritize_tasks", "…",
+                              {"tasks": [("a", None, "high"),
+                                         ("b", None, "low")]}))
+        assert post.call_args.kwargs["timeout"] == 42
+
+    def test_last_used_fallback_flag(self):
+        c = cfg(llm_local_only=True)
+        t = Thinker(c)
+        with patch("executive_assistant.thinker.requests.post",
+                   side_effect=requests.ConnectionError("down")), \
+             patch("executive_assistant.thinker._sleep"):
+            t.run(prioritize_job())
+        assert t.last_used_fallback is True
+
+        resp = MagicMock()
+        resp.json.return_value = {"response": "1, 2, 3"}
+        resp.raise_for_status.return_value = None
+        with patch("executive_assistant.thinker.requests.post", return_value=resp):
+            t.run(prioritize_job())
+        assert t.last_used_fallback is False

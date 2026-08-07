@@ -33,7 +33,7 @@ from email.header import decode_header, make_header
 from email.mime.text import MIMEText
 from email.utils import parseaddr
 
-from executive_assistant.types import EmailSummary
+from executive_assistant.types import EmailSummary, flag_vips
 
 TIMEOUT = 20  # seconds — a hung mail server must never hang a briefing
 
@@ -129,6 +129,68 @@ class ImapEmailClient:
             for uid in reversed(uids):  # newest first in the briefing
                 summaries.append(self._fetch_summary(conn, uid.decode()))
             return summaries
+        finally:
+            _quiet(conn.logout)
+
+    def unread_count(self) -> int:
+        """Cheap unread count: SELECT + SEARCH UNSEEN, no message fetches."""
+        conn = self._connect()
+        try:
+            conn.select("INBOX", readonly=True)
+            typ, data = conn.uid("SEARCH", None, "UNSEEN")
+            if typ != "OK":
+                raise ImapError(f"SEARCH failed: {typ}")
+            return len(data[0].split()) if data and data[0] else 0
+        finally:
+            _quiet(conn.logout)
+
+    def search(self, query: str, limit: int = 10) -> list[EmailSummary]:
+        """Server-side full-text search (UID SEARCH TEXT), newest first.
+
+        Same EmailSummary shape as unread_for_briefing().
+        """
+        conn = self._connect()
+        try:
+            conn.select("INBOX", readonly=True)
+            typ, data = conn.uid("SEARCH", None, "TEXT", f'"{query}"')
+            if typ != "OK":
+                raise ImapError(f"SEARCH failed: {typ}")
+            uids = data[0].split()[-limit:]
+            return [self._fetch_summary(conn, uid.decode())
+                    for uid in reversed(uids)]
+        finally:
+            _quiet(conn.logout)
+
+    def vip_flag(self, messages: list, vip_senders: list[str]) -> list:
+        """Mark messages from VIP senders with 'vip': True (same list back)."""
+        return flag_vips(messages, vip_senders)
+
+    def draft_exists(self, subject_substr: str) -> bool:
+        """True when any draft in the Drafts mailbox has a subject containing
+        the substring (case-insensitive)."""
+        needle = subject_substr.lower()
+        conn = self._connect()
+        try:
+            mailbox = (f'"{self.drafts_folder}"' if " " in self.drafts_folder
+                       else self.drafts_folder)
+            typ, _ = conn.select(mailbox, readonly=True)
+            if typ != "OK":
+                raise ImapError(f"SELECT {self.drafts_folder} failed: {typ}")
+            typ, data = conn.uid("SEARCH", None, "ALL")
+            if typ != "OK":
+                raise ImapError(f"SEARCH failed: {typ}")
+            uids = data[0].split() if data and data[0] else []
+            for uid in uids:
+                uid_s = uid.decode() if isinstance(uid, bytes) else uid
+                typ, fetched = conn.uid(
+                    "FETCH", uid_s, "(BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
+                if typ != "OK":
+                    continue
+                header_bytes, _ = _literals(fetched)
+                subject = parse_header_block(header_bytes)["Subject"]
+                if needle in subject.lower():
+                    return True
+            return False
         finally:
             _quiet(conn.logout)
 

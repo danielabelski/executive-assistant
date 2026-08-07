@@ -21,6 +21,7 @@ needs more, the data — not the prompt — is probably wrong.
 
 from __future__ import annotations
 
+import hashlib
 import random
 from dataclasses import dataclass, field
 from datetime import date
@@ -32,6 +33,14 @@ from executive_assistant.phrasebank import PhraseBank
 #: Compare: a full briefing context runs 2,000+ chars. These jobs stay ~10× leaner.
 THINKING_PROMPT_BUDGET = 600
 
+#: Marker appended to output produced by the deterministic local fallback
+#: instead of the thinking model. Users deserve to know when quality dipped.
+FALLBACK_MARKER = "[fallback]"
+
+#: Hard wall-clock budget for one thinking job. A thinking model that can't
+#: answer in 30s is worse than the instant local fallback.
+DEFAULT_JOB_TIMEOUT_S = 30.0
+
 
 @dataclass
 class ThinkingJob:
@@ -40,6 +49,7 @@ class ThinkingJob:
     kind: str            # e.g. "prioritize_tasks", "triage_email", "draft_reply"
     prompt: str          # the COMPACT prompt — only what the decision needs
     context: dict = field(default_factory=dict)  # structured data for the caller
+    timeout_s: float = DEFAULT_JOB_TIMEOUT_S  # hard limit for whoever executes this
 
     @property
     def within_budget(self) -> bool:
@@ -50,13 +60,29 @@ class BriefingComposer:
     """Template-first assembly for morning briefings and wrap-ups."""
 
     def __init__(self, config: AssistantConfig, phrasebank: PhraseBank | None = None,
-                 day: date | None = None):
+                 day: date | None = None, timeout: float = DEFAULT_JOB_TIMEOUT_S):
         self.cfg = config
         self.pb = phrasebank or PhraseBank()
         # One seed per day: the briefing voice is consistent within a day and
         # varies day to day — and tests can pin a date for reproducibility.
         self.day = day or date.today()
         self.rng = random.Random(self.day.toordinal())
+        self.timeout = timeout
+        # Job-result cache: identical prompts within one day return the cached
+        # answer instead of re-spending tokens. Keyed by day+sha256 so a new
+        # day (new context, new tasks) never serves a stale decision.
+        self._cache: dict[str, str] = {}
+
+    # --- result cache (per-day, token-saving) ----------------------------------
+    def cache_key(self, job: ThinkingJob) -> str:
+        digest = hashlib.sha256(job.prompt.encode("utf-8")).hexdigest()
+        return f"{self.day.toordinal()}:{digest}"
+
+    def cache_get(self, job: ThinkingJob) -> str | None:
+        return self._cache.get(self.cache_key(job))
+
+    def cache_put(self, job: ThinkingJob, result: str) -> None:
+        self._cache[self.cache_key(job)] = result
 
     # --- template-side (zero tokens) ------------------------------------------
     def greeting(self) -> str:
@@ -93,6 +119,7 @@ class BriefingComposer:
         )
         # structured context powers the deterministic fallback (see thinker.py)
         return ThinkingJob(kind="prioritize_tasks", prompt=prompt,
+                           timeout_s=self.timeout,
                            context={"top_n": top_n, "count": len(tasks),
                                     "tasks": [(t.title, t.due, t.priority)
                                               for t in tasks[:10]]})
@@ -105,6 +132,7 @@ class BriefingComposer:
             "Reply with ONLY the number, or 0 for none.\n" + "\n".join(lines)
         )
         return ThinkingJob(kind="triage_email", prompt=prompt,
+                           timeout_s=self.timeout,
                            context={"count": len(summaries),
                                     "senders": [s.sender for s in summaries[:8]]})
 
@@ -120,6 +148,7 @@ class BriefingComposer:
             "Body only, no greeting or signoff."
         )
         return ThinkingJob(kind="draft_reply", prompt=prompt,
+                           timeout_s=self.timeout,
                            context={"opener": opener, "signoff": signoff,
                                     "sender": sender, "subject": subject})
 

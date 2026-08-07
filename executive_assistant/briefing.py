@@ -17,7 +17,7 @@ worth testing) is therefore 100% offline.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Callable
 
 from executive_assistant.config import AssistantConfig
@@ -32,12 +32,21 @@ class Section:
     lines: list[str] = field(default_factory=list)
     error: str | None = None
 
-    def render(self) -> str:
+    def render(self, max_lines: int | None = None) -> str:
+        """Render one section. max_lines caps a chatty section so one noisy
+        source (looking at you, inbox) can't drown the rest of the briefing;
+        the overflow is summarized, not silently dropped."""
         if self.error:
             return f"**{self.title}**\n⚠ unavailable — {self.error}"
         if not self.lines:
             return f"**{self.title}**\n(nothing to report)"
-        body = "\n".join(f"• {line}" for line in self.lines)
+        shown = self.lines
+        overflow = 0
+        if max_lines is not None and len(self.lines) > max_lines:
+            shown, overflow = self.lines[:max_lines], len(self.lines) - max_lines
+        body = "\n".join(f"• {line}" for line in shown)
+        if overflow:
+            body += f"\n• … and {overflow} more"
         return f"**{self.title}**\n{body}"
 
 
@@ -47,6 +56,77 @@ def _run(collector: Collector, title: str) -> Section:
         return Section(title=title, lines=collector())
     except Exception as exc:  # deliberately broad — see RESILIENCE RULE above
         return Section(title=title, error=str(exc).splitlines()[0][:120])
+
+
+def is_weekend(today: date) -> bool:
+    """Saturday/Sunday. Weekends get a lighter briefing — the user asked for
+    less noise on days off, not a wall of overdue-task guilt."""
+    return today.weekday() >= 5
+
+
+def render_sections(sections: list[Section], order: list[str] | None = None) -> list[Section]:
+    """Reorder sections by title. Sections named in `order` come first in that
+    sequence; anything unnamed keeps its original relative order at the end
+    (so a stale config entry can never silently drop a section)."""
+    if not order:
+        return list(sections)
+    by_title = {s.title: s for s in sections}
+    ordered = [by_title[name] for name in order if name in by_title]
+    ordered += [s for s in sections if s.title not in set(order)]
+    return ordered
+
+
+def headline(today: date, sections: list[Section]) -> str:
+    """One-line summary for the top of the briefing, e.g.
+    '3 tasks · busiest 10:00 · ☀️'. Scannable in a lock-screen glance; the
+    full sections are below for anyone who wants detail. Returns "" when
+    there's nothing worth summarizing."""
+    parts: list[str] = []
+    for s in sections:
+        title = s.title.lower()
+        if s.error or not s.lines:
+            continue
+        if "task" in title:
+            n = len(s.lines)
+            if n == 1 and s.lines[0].lower().startswith("no "):
+                n = 0  # "No open tasks." is a status, not a task
+            parts.append(f"{n} task{'s' if n != 1 else ''}")
+        elif "schedule" in title or "calendar" in title:
+            import re
+            from collections import Counter
+
+            hours = Counter(int(m.group(1))
+                            for line in s.lines
+                            for m in [re.search(r"\b(\d{1,2}):\d{2}\b", line)] if m)
+            if hours:
+                busiest, _ = max(hours.items(), key=lambda kv: (kv[1], -kv[0]))
+                parts.append(f"busiest {busiest:02d}:00")
+        elif "weather" in title:
+            first = s.lines[0].strip()
+            if first and not first[0].isascii():
+                emoji = first[0]
+                # keep the variation selector (☀️ = ☀ + U+FE0F) so the emoji
+                # renders in color rather than as a text glyph
+                if len(first) > 1 and first[1] == "\ufe0f":
+                    emoji += "\ufe0f"
+                parts.append(emoji)  # leading condition emoji
+    return " · ".join(parts)
+
+
+def _in_quiet_hours(quiet_hours, now: datetime) -> bool:
+    """True if `now` falls inside a (start, end) "HH:MM" window. Handles
+    overnight windows (22:00–07:00) by wrapping past midnight. Any malformed
+    value → False: a config typo must never kill a briefing."""
+    try:
+        start_h, start_m = (int(x) for x in str(quiet_hours[0]).split(":"))
+        end_h, end_m = (int(x) for x in str(quiet_hours[1]).split(":"))
+    except (TypeError, ValueError, IndexError):
+        return False
+    t = now.hour * 60 + now.minute
+    start, end = start_h * 60 + start_m, end_h * 60 + end_m
+    if start <= end:
+        return start <= t < end
+    return t >= start or t < end
 
 
 # --- real collectors, built from config ------------------------------------------
@@ -186,13 +266,38 @@ class MorningBriefing:
             collectors["🐙 GitHub"] = _github_collector(cfg)
         return collectors
 
+    def _collectors_for(self, today: date) -> dict[str, Collector]:
+        """Collector set for the day. On weekends, a configured
+        `briefing_weekend_sections` list pares the briefing down to its
+        essentials; dropped collectors are never even run (why pay the API
+        call for a section nobody will see?)."""
+        weekend_names = getattr(self.cfg, "briefing_weekend_sections", None)
+        if weekend_names and is_weekend(today):
+            return {t: c for t, c in self.collectors.items() if t in set(weekend_names)}
+        return self.collectors
+
     def sections(self) -> list[Section]:
         return [_run(collector, title) for title, collector in self.collectors.items()]
 
-    def render_text(self) -> str:
+    def render_text(self, today: date | None = None, now: datetime | None = None) -> str:
+        today = today or date.today()
+        collectors = self._collectors_for(today)
+        sections = [_run(c, title) for title, c in collectors.items()]
+        sections = render_sections(
+            sections, getattr(self.cfg, "briefing_section_order", None))
+        max_lines = getattr(self.cfg, "briefing_max_lines", 10)
+
         greeting = self._greeting()
-        header = f"☀️ **{greeting}** {date.today():%A, %B %-d}"
-        parts = [header] + [s.render() for s in self.sections()]
+        header = f"☀️ **{greeting}** {today:%A, %B %-d}"
+        parts: list[str] = []
+        quiet = getattr(self.cfg, "quiet_hours", None)
+        if quiet and _in_quiet_hours(quiet, now or datetime.now()):
+            parts.append("🌙 quiet hours — sending anyway because you asked for a briefing")
+        parts.append(header)
+        hl = headline(today, sections)
+        if hl:
+            parts.append(hl)
+        parts += [s.render(max_lines=max_lines) for s in sections]
         if self.cfg.email_enabled and self.cfg.email_permission != "draft_only":
             parts.append("_Reply here and I can draft email responses for your approval._")
         elif self.cfg.email_enabled:
@@ -248,4 +353,31 @@ class EveningWrapUp:
                 "**Suggested focus for tomorrow**\n"
                 + "\n".join(f"{i}. {t.title}" for i, t in enumerate(top, 1))
             )
+        return "\n\n".join(parts)
+
+    def wrap_up(self, streak: int = 0, tomorrow: list[str] | None = None,
+                used_fallback: bool = False) -> str:
+        """The full evening review: the standard wrap-up plus the motivational
+        and honesty layers.
+
+        - streak: consecutive days with ≥1 completed task (computed by the
+          caller, which owns the history DB). Shown because momentum is the
+          cheapest motivation there is.
+        - tomorrow: preview lines for tomorrow (e.g. first calendar events),
+          so the evening message answers "what's waiting for me?".
+        - used_fallback: True when the priority suggestions came from the
+          deterministic local fallback instead of the thinking model — we
+          say so, because quietly degraded quality is how trust dies."""
+        from executive_assistant.composer import FALLBACK_MARKER
+
+        parts = [self.render_text()]
+        if streak >= 1:
+            parts.append(f"🔥 Streak: {streak} consecutive day{'s' if streak != 1 else ''} "
+                         "with a completed task")
+        if tomorrow:
+            parts.append("**Tomorrow**\n" + "\n".join(f"• {line}" for line in tomorrow))
+        if used_fallback:
+            parts.append(f"_Priority suggestions came from the deterministic local "
+                         f"fallback {FALLBACK_MARKER} — the thinking model was "
+                         f"unavailable, so ranking may be less nuanced._")
         return "\n\n".join(parts)

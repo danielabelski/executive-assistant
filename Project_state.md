@@ -1,6 +1,6 @@
 # Project State: Executive Assistant
 
-> **Last updated:** 2026-07-18
+> **Last updated:** 2026-08-06
 > **Current phase:** build
 > **Overall health:** green
 
@@ -26,6 +26,17 @@ user-chosen providers and permission levels set during an onboarding wizard.
       (qwen2.5:3b, 3.8s warm; hallucination regression test added)
 - [x] 136 tests, all green; live smoke: local-ics + tasks + NWS weather
 - [x] v0.1.0 + v0.2.0 pushed to github.com/drwjkirkpatrick-web/executive-assistant
+- [x] v0.3.0 — 50 improvements: recurring/snooze/project tasks + tasks_cli,
+      briefing headline/weekend/quiet-hours/line budgets, wrap-up streaks +
+      tomorrow preview, phrasebank 1,216 phrases/76 cats + usage stats + tone
+      filter + slot validation, thinker retry/preflight/timeout/fallback-flag,
+      approval audit log + rate cap + explain CLI, config schema v3 + env
+      overrides, onboarding review screen + --only sections, NWS hourly precip
+      + alerts + trend, VIP senders/unread-count/draft-dedup/search on both
+      email providers, next-event/all-day/conflicts across all calendar
+      providers, paths.py + rotating logs, --json/--version/phrasebank/approve
+      CLI commands, Makefile + scripts/dev.sh
+- [x] 282 tests, all green
 
 ### In Progress
 - [ ] —
