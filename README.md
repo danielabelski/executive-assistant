@@ -1,5 +1,6 @@
 # Executive Assistant 🌅
 
+[![Version 0.3.0](https://img.shields.io/badge/version-0.3.0-blueviolet)](#-whats-new-in-v030)
 [![Tests: 282 passing](https://img.shields.io/badge/tests-282%20passing-brightgreen)](#-tests)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](#-quick-start)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](#-license)
